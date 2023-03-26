@@ -21,7 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "arm_math.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -50,7 +50,9 @@ UART_HandleTypeDef huart2;
 float voltage = 0;
 int32_t QEIReadRaw = 0;
 float degrees;
-float setpoint = 360;
+float setpoint = 0;
+
+arm_pid_instance_f32 PID = { 0 };
 
 /* USER CODE END PV */
 
@@ -64,6 +66,7 @@ static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 
 void QEI_unwrap();
+void motor(float Vin);
 
 /* USER CODE END PFP */
 
@@ -116,13 +119,18 @@ int main(void) {
 	// Timer 3 Timer Interrupt (1000Hz)
 	HAL_TIM_Base_Start_IT(&htim3);
 
+	// setup PID
+	PID.Kp = 0.1;
+	PID.Ki = 0.0001;
+	PID.Kd = 0.1;
+	arm_pid_init_f32(&PID, 0);
+
 	/* USER CODE END 2 */
 
 	/* Infinite loop */
 	/* USER CODE BEGIN WHILE */
 	while (1) {
-		__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 5000);
-		degrees = QEIReadRaw * 360.0 / 3072.0;
+
 		/* USER CODE END WHILE */
 
 		/* USER CODE BEGIN 3 */
@@ -399,6 +407,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 	if (htim == &htim3) {
 		// Called every 1ms (1000Hz)
 		QEI_unwrap();
+		voltage = arm_pid_f32(&PID, setpoint - degrees);
+		motor(voltage);
 	}
 }
 
@@ -416,7 +426,32 @@ void QEI_unwrap() {
 	}
 
 	QEIReadRaw = currentpos + offset;
+	degrees = QEIReadRaw * 360.0 / 3072.0;
 	lastpos = currentpos;
+}
+
+void motor(float Vin) {
+	if (Vin > 0) {
+		// forward
+		if (Vin > 5.0) {
+			Vin = 5.0;
+		}
+		__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, Vin * 200.0);
+		__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 0);
+	} else if (Vin < 0) {
+		// reverse
+		Vin *= -1.0;
+		if (Vin > 5.0) {
+			Vin = 5.0;
+		}
+		__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 0);
+		__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, Vin * 200.0);
+	} else {
+		// stop
+		__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 0);
+		__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 0);
+	}
+
 }
 
 /* USER CODE END 4 */
